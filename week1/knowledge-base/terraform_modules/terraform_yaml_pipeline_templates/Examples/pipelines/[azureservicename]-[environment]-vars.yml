@@ -1,0 +1,14 @@
+# Replace tokens 
+variables:
+  - name: terraformVersion
+    value: '1.5.7'
+
+# Feature Flags (By default these are disabled and have to be explicitly enabled)
+  - name: destroy # Trigger the destroy stage to remove the infrastructure
+    value: 'true'
+
+  - name: terraform_docs # Automatically generate terraform documentation - Only usable on 'feature' branches
+    value: 'true'
+
+  - name: terraform_format # Automatically format terraform code - Only usable on 'feature' branches
+    value: 'true'

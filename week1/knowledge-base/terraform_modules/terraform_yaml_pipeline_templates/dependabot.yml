@@ -1,0 +1,527 @@
+parameters:
+  terraformVersion: # Terraform version to use - Required parameter
+  terraform_docs_version: "0.19.0" # Terraform Docs version to use - Default is 0.19.0
+  agentPool: # Agent pool to use - Required parameter
+  gitRef: "dev" # Git reference to use to test the dependency upgrade - Default is dev
+  environment: "dev" # Environment to deploy to test the dependency upgrade- Default is dev
+  tfvarFile: # TFVar file to use - Default is module.tf.tfvars
+  root_directory: "/Tests/" # Root directory to use - Default is /Tests/
+  service_connection_name: "cl-axso-az-core-cloudinfra-nonprod-spi" ##access to the testing subscription
+  backend_resource_group: "axso-prod-appl-tim-infra-modules-rg" # Default - backend resource group name (Cloud Infra Subscription)
+  backend_storage_accountname: "axso4prod4appl4tim4sa" # Default - backend storage account name (Cloud Infra Subscription)
+  container_name: "terraform-tim-infra-modules" # Default - container name (Cloud Infra Subscription)
+  container_key: # State file name e.g. "azurerm_resource_group/dependabot_test.tfstate"
+
+
+stages:
+  - stage: CheckDependencies
+    displayName: 'Check Dependencies'
+    jobs:
+      - job: Dependabot
+        displayName: 'Run Dependabot'
+        pool: 
+          vmImage: 'ubuntu-latest' # Only Ubuntu and MacOS is supported at this time
+        steps:
+          - task: dependabot@2
+            inputs:
+              setAutoComplete: true
+              autoApprove: true
+            displayName: 'Run Dependabot'
+
+  - stage: FormatCode
+    displayName: 'Format Code'
+    dependsOn: CheckDependencies
+    jobs:
+    - job: Format_Code
+      pool: "${{ parameters.agentPool }}"
+      workspace:
+          clean: all
+      steps:
+        - checkout: self
+          persistCredentials: true
+
+        - powershell: |
+            git pull origin $(Build.SourceBranch)
+          displayName: 'Pull latest changes from dev branch'
+
+        - task: TerraformInstaller@1
+          inputs:
+            terraformVersion: ${{ parameters.terraformVersion }}        
+
+        ### Format code using terraform fmt.
+        - script: |
+            # Set root directory
+            cd "$(Build.SourcesDirectory)"
+
+            # Terraform fmt all files
+            echo "Formatting Terraform files"
+            terraform fmt --recursive
+
+          displayName: 'Format Terraform Code'
+        ### Commit and push formatted code.
+        - powershell: |
+            git config --local user.email "terraform-docs@axpo.com"
+            git config --local user.name "Terraform Docs"
+            git add .
+            git commit -m "Push formatted tf code back to git repo"
+            git push origin HEAD:$(Build.SourceBranch)
+          displayName: 'Commit Format Terraform Code'
+          env:
+            SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+  - stage: Validate
+    displayName: 'Validate Code'
+    dependsOn: FormatCode
+    jobs:
+      - job: Validate
+        pool: "${{ parameters.agentPool }}"
+        workspace:
+            clean: all
+        steps:
+          - checkout: self
+            persistCredentials: true
+            path: src
+
+          - powershell: |
+              git pull origin $(Build.SourceBranch)
+            displayName: 'Pull latest changes from dev branch'
+
+          - task: AzureKeyVault@2
+            inputs:
+              azureSubscription: ${{ parameters.service_connection_name }}
+              keyVaultName: 'axso-prod-appl-tim-kv'
+              secretsFilter: '*'
+              runAsPreJob: true 
+
+          - task: InstallSSHKey@0
+            inputs:
+              knownHostsEntry: $(terraform-git-ssh-known-hosts) # Known hosts entry for the git repository from key vault
+              sshPublicKey: $(terraform-git-ssh-pub) # Public key for the git repository from key vault
+              sshPassphrase: $(terraform-git-ssh-passphrase) # Passphrase for the git repository from key vault
+              sshKeySecureFile: 'terraform_rsa'
+
+          - task: TerraformInstaller@1
+            inputs:
+              terraformVersion: ${{ parameters.terraformVersion }}
+    
+          - task: qetza.replacetokens.replacetokens-task.replacetokens@6
+            displayName: 'Replace tokens in tfvars and tf'
+            inputs:
+              root: '$(Agent.BuildDirectory)/src/${{ parameters.root_directory }}'
+              sources: |
+                *.tf
+                *.tfvars
+              encoding: 'utf8'
+              missingVarAction: 'replace'
+              missingVarLog: 'warn'
+              tokenPattern: 'custom'
+              tokenPrefix: '~{'
+              tokenSuffix: '}~'
+
+          - task: TerraformTaskV4@4
+            displayName: Terraform Init
+            inputs:
+              provider: 'azurerm'
+              command: 'init'
+              workingDirectory: '$(Agent.BuildDirectory)/src/${{ parameters.root_directory }}'
+              backendServiceArm: ${{ parameters.service_connection_name }}
+              backendAzureRmResourceGroupName: ${{ parameters.backend_resource_group }}
+              backendAzureRmStorageAccountName: ${{ parameters.backend_storage_accountname }}
+              backendAzureRmContainerName: ${{ parameters.container_name }}
+              backendAzureRmKey: ${{ parameters.container_key }}
+            env:
+              ARM_USE_AZUREAD: true
+              
+          - task: TerraformTaskV4@4
+            displayName: Terraform Plan
+            inputs:
+              provider: 'azurerm'
+              command: 'plan'
+              workingDirectory: '$(Agent.BuildDirectory)/src/${{ parameters.root_directory }}'
+              commandOptions: "--input=false --var-file=$(Agent.BuildDirectory)/src/${{ parameters.root_directory }}${{ parameters.tfvarFile }} --out=$(Agent.BuildDirectory)/src/${{ parameters.root_directory }}plan.tfplan"
+              environmentServiceNameAzureRM: ${{ parameters.service_connection_name }}
+            env:
+              ARM_USE_AZUREAD: true
+
+          - task: PowerShell@2
+            name: ChangeDetection
+            inputs:
+              targetType: inline
+              pwsh: true
+              displayName: Saving Terraform Plan Output
+              workingDirectory: '$(Agent.BuildDirectory)/src/${{ parameters.root_directory }}'
+              script: |
+                cd "$(Agent.BuildDirectory)/src/${{ parameters.root_directory }}"
+                terraform show -json -no-color $(Agent.BuildDirectory)/src/${{ parameters.root_directory }}plan.tfplan >> $(Agent.BuildDirectory)/src/${{ parameters.root_directory }}plan.json
+                $obj = Get-Content $(Agent.BuildDirectory)/src/${{ parameters.root_directory }}plan.json | ConvertFrom-Json
+                $nc = ($obj.resource_changes | where { 'no-op' -notcontains $_.change.actions }).length -ne 0
+                echo "##vso[task.setvariable variable=tf_haschg;isOutput=true]$nc"
+                $add = ($obj.resource_changes | where { 'create' -eq $_.change.actions }).length
+                echo "##vso[task.setvariable variable=tf_add;isOutput=true]$add"
+                $del = ($obj.resource_changes | where { 'delete' -eq $_.change.actions }).length
+                echo "##vso[task.setvariable variable=tf_del;isOutput=true]$del"
+                $del_chg = ($obj.resource_changes | where { '{delete, create}' -eq $_.change.actions }).length
+                echo "##vso[task.setvariable variable=tf_delchg;isOutput=true]$del_chg"
+                $upd = ($obj.resource_changes | where { 'update' -eq $_.change.actions }).length
+                echo "##vso[task.setvariable variable=tf_upd;isOutput=true]$upd"
+                echo "total changes $nc"
+                echo "add $add"
+                echo "delete $del"
+                echo "delete_change $del_chg"
+                echo "updates $upd"
+
+          - task: PowerShell@2
+            condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+            displayName: Prepare Artifacts
+            inputs:
+              targetType: inline
+              pwsh: true
+              workingDirectory: '$(Agent.BuildDirectory)/src'
+              script: |
+                New-Item -Path . -Name artifacts/${{ parameters.root_directory }} -ItemType Directory -Force
+                Copy-Item -Path ./${{ parameters.root_directory }}/*.tf -Destination ./artifacts/${{ parameters.root_directory }} -Force
+                Copy-Item -Path ./${{ parameters.root_directory }}/*.tfvars -Destination ./artifacts/${{ parameters.root_directory }} -Force
+                Copy-Item -Path ./${{ parameters.root_directory }}/*.json -Destination ./artifacts/${{ parameters.root_directory }} -Force
+                Copy-Item -Path ./${{ parameters.root_directory }}/*.tfplan -Destination ./artifacts/${{ parameters.root_directory }} -Force
+
+          - task: PublishBuildArtifacts@1
+            condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+            displayName: 'Publish ${{ parameters.environment }} Artifacts'
+            inputs:
+              PathtoPublish: '$(Agent.BuildDirectory)/src/artifacts'
+              publishLocation: Container
+              ArtifactName: ${{ parameters.environment }}
+
+  - stage: Deploy
+    displayName: 'Deploy'
+    dependsOn: Validate
+    jobs:
+      - job: Deploy
+        pool: "${{ parameters.agentPool }}"
+        workspace:
+            clean: all
+        steps:
+        - download: none
+        - task: DownloadBuildArtifacts@0
+          displayName: 'Downloading ${{ parameters.environment }} Artifacts'
+          inputs:
+            buildType: 'current'
+            downloadType: 'single'
+            artifactName: ${{ parameters.environment }}
+            downloadPath: '$(System.ArtifactsDirectory)'
+          
+        - task: AzureKeyVault@2
+          inputs:
+            azureSubscription: ${{ parameters.service_connection_name }} # Azure Resource Manager service connection from frontend
+            keyVaultName: 'axso-prod-appl-tim-kv'
+            secretsFilter: '*'
+            runAsPreJob: true 
+
+        - task: InstallSSHKey@0
+          inputs:
+            knownHostsEntry: $(terraform-git-ssh-known-hosts) # Known hosts entry for the git repository from key vault
+            sshPublicKey: $(terraform-git-ssh-pub) # Public key for the git repository from key vault
+            sshPassphrase: $(terraform-git-ssh-passphrase) # Passphrase for the git repository from key vault
+            sshKeySecureFile: 'terraform_rsa'
+
+        - task: TerraformInstaller@0
+          inputs:
+            terraformVersion: ${{ parameters.terraformVersion }}
+
+        - task: TerraformTaskV4@4
+          displayName: Terraform Init
+          inputs:
+            provider: 'azurerm'
+            command: 'init'
+            workingDirectory: "$(System.ArtifactsDirectory)/${{ parameters.environment }}${{ parameters.root_directory }}"
+            backendServiceArm: ${{ parameters.service_connection_name }}
+            backendAzureRmResourceGroupName: ${{ parameters.backend_resource_group }}
+            backendAzureRmStorageAccountName: ${{ parameters.backend_storage_accountname }}
+            backendAzureRmContainerName: ${{ parameters.container_name }}
+            backendAzureRmKey: ${{ parameters.container_key }}
+          env:
+            ARM_USE_AZUREAD: true
+
+        - task: TerraformTaskV4@4
+          displayName: Terraform Apply
+          inputs:
+            provider: 'azurerm'
+            command: 'apply'
+            workingDirectory: "$(System.ArtifactsDirectory)/${{ parameters.environment }}${{ parameters.root_directory }}"
+            commandOptions: "--input=false --var-file=$(System.ArtifactsDirectory)/${{ parameters.environment }}${{ parameters.root_directory }}${{ parameters.tfvarFile }}"
+            environmentServiceNameAzureRM: ${{ parameters.service_connection_name }}
+          env:
+            ARM_USE_AZUREAD: true
+
+  - stage: Destroy
+    displayName: 'Destroy'
+    dependsOn: Deploy
+    jobs:
+      - job: Destroy
+        pool: "${{ parameters.agentPool }}"
+        workspace:
+            clean: all
+        steps:
+        - download: none
+
+        - task: DownloadBuildArtifacts@0
+          displayName: 'Downloading ${{ parameters.environment }} Artifacts'
+          inputs:
+            buildType: 'current'
+            downloadType: 'single'
+            artifactName: ${{ parameters.environment }}
+            downloadPath: '$(System.ArtifactsDirectory)'
+              
+        - task: AzureKeyVault@2
+          inputs:
+            azureSubscription: ${{ parameters.service_connection_name }} # Azure Resource Manager service connection from frontend
+            keyVaultName: 'axso-prod-appl-tim-kv'
+            secretsFilter: '*'
+            runAsPreJob: true 
+
+        - task: InstallSSHKey@0
+          inputs:
+            knownHostsEntry: $(terraform-git-ssh-known-hosts) # Known hosts entry for the git repository from key vault
+            sshPublicKey: $(terraform-git-ssh-pub) # Public key for the git repository from key vault
+            sshPassphrase: $(terraform-git-ssh-passphrase) # Passphrase for the git repository from key vault
+            sshKeySecureFile: 'terraform_rsa'
+
+        - task: TerraformInstaller@1
+          inputs:
+            terraformVersion: ${{ parameters.terraformVersion }}
+
+        - task: TerraformTaskV4@4
+          displayName: Terraform Init
+          inputs:
+            provider: 'azurerm'
+            command: 'init'
+            workingDirectory: "$(System.ArtifactsDirectory)/${{ parameters.environment }}${{ parameters.root_directory }}"
+            backendServiceArm: ${{ parameters.service_connection_name }}
+            backendAzureRmResourceGroupName: ${{ parameters.backend_resource_group }}
+            backendAzureRmStorageAccountName: ${{ parameters.backend_storage_accountname }}
+            backendAzureRmContainerName: ${{ parameters.container_name }}
+            backendAzureRmKey: ${{ parameters.container_key }}
+          env:
+            ARM_USE_AZUREAD: true
+
+        - task: TerraformTaskV4@4
+          displayName: Terraform Destroy
+          inputs:
+            provider: 'azurerm'
+            command: 'destroy'
+            workingDirectory: "$(System.ArtifactsDirectory)/${{ parameters.environment }}${{ parameters.root_directory }}"
+            commandOptions: "--input=false --var-file=$(System.ArtifactsDirectory)/${{ parameters.environment }}${{ parameters.root_directory }}${{ parameters.tfvarFile }}"
+            environmentServiceNameAzureRM: ${{ parameters.service_connection_name }}
+          env:
+            ARM_USE_AZUREAD: true
+
+  - stage: TerraformDocs
+    displayName: 'Update Terraform Docs'
+    dependsOn: Destroy
+    jobs:
+    - job: Terraform_Docs
+      pool: ${{ parameters.agentPool }}
+      workspace:
+          clean: all
+
+      steps:
+        - checkout: self
+          persistCredentials: true
+          path: src
+
+        - checkout: Dependabot_Pipeline
+          persistCredentials: true
+          path: terraform_yaml_pipeline_templates         
+          condition: eq(variables['System.TeamProject'], 'TIM-INFRA-MODULES')               
+
+        - powershell: |
+            git pull origin $(Build.SourceBranch)
+          displayName: 'Pull latest changes from dev branch'
+          workingDirectory: '$(Agent.BuildDirectory)/src'             
+          
+
+        ### Install Terraform-Docs.
+        - powershell: |
+            Invoke-WebRequest -Uri "https://github.com/terraform-docs/terraform-docs/releases/download/v${{ parameters.terraform_docs_version }}/terraform-docs-v${{ parameters.terraform_docs_version }}-windows-amd64.zip" -OutFile "terraform-docs.zip"
+            Expand-Archive -Path "terraform-docs.zip" -DestinationPath "$(System.DefaultWorkingDirectory)\Terraform-Docs" -Force
+            $env:Path += ";$(System.DefaultWorkingDirectory)\terraform-docs"
+          displayName: 'Install terraform-docs Windows'
+          condition: startswith(variables['Agent.OS'], 'Windows')     
+
+        ### Install Terraform-Docs.
+        - script: |
+            cd $(Agent.TempDirectory)
+            curl -sSLo ./terraform-docs.tar.gz https://terraform-docs.io/dl/v${{ parameters.terraform_docs_version }}/terraform-docs-v${{ parameters.terraform_docs_version }}-$(uname)-amd64.tar.gz
+            tar -xzf terraform-docs.tar.gz
+            chmod +x terraform-docs
+          displayName: 'Install terraform-docs Linux'
+          condition: eq(variables['Agent.OS'], 'Linux')      
+
+
+        ### Install Terraform-Docs.
+        - powershell: |
+            Invoke-WebRequest -Uri "https://github.com/terraform-docs/terraform-docs/releases/download/v${{ parameters.terraform_docs_version }}/terraform-docs-v${{ parameters.terraform_docs_version }}-windows-amd64.zip" -OutFile "terraform-docs.zip"
+            Expand-Archive -Path "terraform-docs.zip" -DestinationPath "$(System.DefaultWorkingDirectory)\Terraform-Docs" -Force
+            $env:Path += ";$(System.DefaultWorkingDirectory)\terraform-docs"
+          displayName: 'Install terraform-docs Windows'
+          condition: startswith(variables['Agent.OS'], 'Windows')  
+          workingDirectory: '$(Agent.BuildDirectory)/src'    
+
+
+        ### update README.md files and generate new README.md files for each TF module.
+
+        - bash: |
+            cat $(Agent.BuildDirectory)/terraform_yaml_pipeline_templates/.azuredevops/terraform-docs/.terraform-docs.yml
+            ls
+            ls ./Tests
+            cd ./Tests
+            $(Agent.TempDirectory)/terraform-docs markdown table . --output-file README.md
+            cd ..
+            $(Agent.TempDirectory)/terraform-docs . --output-file README.md -c $(Agent.BuildDirectory)/terraform_yaml_pipeline_templates/.azuredevops/terraform-docs/.terraform-docs.yml
+          displayName: 'Check and update README files for TF modules'
+          condition: eq(variables['Agent.OS'], 'Linux')
+          workingDirectory: '$(Agent.BuildDirectory)/src'                  
+
+        ### Commit and push updated README.md files for TF modules.
+        - powershell: |
+            git config --local user.email "terraform-docs@axpo.com"
+            git config --local user.name "Terraform Docs"
+            git pull origin $(Build.SourceBranch)
+            git add ./README.md
+            git add ./Examples/README.md
+            git add ./Tests/README.md
+            git commit -m "Update README.md for each TF module"
+            git push origin HEAD:$(Build.SourceBranch)
+          displayName: 'Commit and Push updated README.md files for TF modules'
+          workingDirectory: '$(Agent.BuildDirectory)/src'        
+          env:
+            SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+  - stage: UpdateReleaseNotes
+    displayName: 'Update Release Notes'
+    dependsOn: TerraformDocs
+    jobs:
+    - job: Update_Release_Notes
+      pool: ${{ parameters.agentPool }}
+      workspace:
+          clean: all
+
+      steps:
+        - checkout: self
+          persistCredentials: true
+
+        - powershell: |
+            git pull origin $(Build.SourceBranch)
+          displayName: 'Pull latest changes from dev branch'
+
+        ### Update Release Notes.
+        - powershell: |
+            # Set root directory
+            Set-Location "$(Build.SourcesDirectory)"
+
+            # Get README.md file and RELEASES.md file
+            $readMeFile = Get-ChildItem -Path $(Build.SourcesDirectory) -Filter 'README.md'
+            $releaseNotesFile = Get-ChildItem -Path $(Build.SourcesDirectory) -Filter 'RELEASES.md'
+
+            # Replace date values in the format "00/00/0000" with the current date in the README.md file
+            (Get-Content -Path $readMeFile.FullName) | ForEach-Object { $_ -replace '\d{2}/\d{2}/\d{4}', (Get-Date -Format "dd/MM/yyyy") } | Set-Content -Path $readMeFile.FullName
+
+            # Get the latest tag and increment the patch version
+            $content = Get-Content -Path $readMeFile.FullName -Raw
+            $pattern = "v(\d+)\.(\d+)\.(\d+)"
+            $version = $content | Select-String -Pattern $pattern -AllMatches | ForEach-Object { $_.Matches.Value }
+
+            # increment the patch version
+            $versionParts = $version -split '\.'
+            $incrementedVersion = '{0}.{1}.{2}' -f $versionParts[0], $versionParts[1], ([int]$versionParts[2] + 1)
+
+            # Find and replace only the version number in the README.md file
+            (Get-Content -Path $readMeFile.FullName) | ForEach-Object { $_ -replace $pattern, "$incrementedVersion" } | Set-Content -Path $readMeFile.FullName
+            
+            # Append the release notes file with the new version and the current date and make sure there is a space between the last release note and the new one
+            $newReleaseNote = "`n"
+            $newReleaseNote += "## $incrementedVersion - $(Get-Date -Format "dd/MM/yyyy")"
+            $newReleaseNote += "`n`n"
+            $newReleaseNote += "* Dependencies updated - Provider versions updated"
+            $newReleaseNote | Add-Content -Path $releaseNotesFile.FullName
+          displayName: 'Update Release Notes'
+
+        ### Commit and push updated README.md files for TF modules.
+        - powershell: |
+            git config --local user.email "terraform-docs@axpo.com"
+            git config --local user.name "Terraform Docs"
+            git pull origin $(Build.SourceBranch)
+            git add $(System.DefaultWorkingDirectory)/README.md
+            git add $(System.DefaultWorkingDirectory)/RELEASES.md
+            git commit -m "Update README.md and RELEASES.md files"
+            git push origin HEAD:$(Build.SourceBranch)
+          displayName: 'Commit and Push updated README.md and RELEASES.md files'
+          env:
+            SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+  - stage: ReleaseNewTag
+    displayName: 'Release New Tag and Update main.tf'
+    dependsOn: UpdateReleaseNotes
+    jobs:
+    - job: Release_New_Tag
+      pool:
+        vmImage: 'ubuntu-latest'
+      workspace:
+          clean: all
+
+      steps:
+        - checkout: self
+          persistCredentials: true
+
+        - script: az config set extension.use_dynamic_install=yes_without_prompt
+          displayName: 'Allow extensions'
+
+        - pwsh: |
+            git pull origin $(Build.SourceBranch)
+
+            # Set root directory
+            Set-Location "$(Build.SourcesDirectory)"
+
+            # Get README.md file
+            $readMeFile = Get-ChildItem -Path $(Build.SourcesDirectory) -Filter 'README.md'
+
+            # Get the latest version from the README.md file
+            $content = Get-Content -Path $readMeFile.FullName -Raw
+            $pattern = "v(\d+)\.(\d+)\.(\d+)"
+            $version = $content | Select-String -Pattern $pattern -AllMatches | ForEach-Object { $_.Matches.Value }
+
+            # Split the version into parts
+            $versionParts = $version -split '\.'
+
+            $tagVersion = '{0}.{1}.{2}' -f $versionParts[0], $versionParts[1], $versionParts[2]
+            $tagDescription = "Dependencies updated - Provider versions updated"
+
+            # Update main.tf
+            $content | Set-Content $readMeFile.FullName
+
+            # Create a new tag
+            git config --local user.email "terraform-docs@axpo.com"
+            git config --local user.name "Terraform Docs"
+            git tag -a $tagVersion -m $tagDescription
+            git push origin $tagVersion
+          displayName: 'Push new tag to repository'
+
+        - script: echo $(System.AccessToken) | az devops login
+          displayName: 'Login to DevOps'
+
+        - pwsh: |
+            # Create the PR without auto-complete
+            $pullRequest = az repos pr create --repository $(Build.Repository.Name) --source-branch 'refs/heads/dev' --target-branch 'refs/heads/main' --title 'Release - Latest providers' --description 'Update to latest providers with dependabot' --auto-complete true --labels 'dependencies' --work-items '399994' | ConvertFrom-Json
+            
+            # Write-Output
+            Write-Output "Pull RequestId: $($pullRequest.pullRequestId)"
+
+            # Check if the PR was created successfully
+            if ($null -ne $pullRequest.pullRequestId) {
+              # Complete the PR
+              az repos pr update --id $pullRequest.pullRequestId --status completed --bypass-policy true --bypass-policy-reason 'Automated-tests-passed'
+            } else {
+              Write-Output "Failed to close the PR."
+              exit 1
+            }
+          displayName: 'Create and Complete PR'

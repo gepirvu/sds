@@ -1,0 +1,1 @@
+# Purpose: Define the resources to be created in the Terraform configuration.

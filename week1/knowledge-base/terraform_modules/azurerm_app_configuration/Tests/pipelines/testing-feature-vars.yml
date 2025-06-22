@@ -1,0 +1,25 @@
+# Replace tokens 
+variables:
+  - name: terraformVersion
+    value: '1.9.6'
+  
+  - name: agentPool
+    value: 'GEN-CA-TCI'
+
+  - name: gitRef
+    value: 'feature/mmdiez'
+
+  - name: environment
+    value: 'feature'
+    
+  - name: repo
+    value: 'APP_CONFIG'
+  
+  - name: destroy
+    value: 'true'
+  
+  - name: terraform_docs   # Only usable on 'feature' branches
+    value: 'true'
+
+  - name: terraform_format # Only usable on 'feature' branches
+    value: 'true'

@@ -1,0 +1,6 @@
+location              = "West Europe"
+environment           = "dev"
+project_name          = "project"
+subscription          = "np"
+resource_group_name   = "axso-np-appl-ssp-test-rg"
+retention_in_days_law = "30"

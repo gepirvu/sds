@@ -1,0 +1,2 @@
+#Common Vars
+location = "westeurope"

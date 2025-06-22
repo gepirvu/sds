@@ -1,0 +1,26 @@
+# Replace tokens 
+variables:
+  - name: terraformVersion
+    value: '1.9.6'
+  
+  - name: agentPool
+    value: 'GEN-CA-TCI'
+
+  - name: gitRef
+    value: 'dev'
+
+  - name: environment
+    value: 'dev'
+
+  - name: repo
+    value: 'azurerm_linux_virtual_machine_scale_set'
+
+# Pipeline Stages (Feature flags)
+  - name: destroy # Used to destroy the infrastructure
+    value: 'true'
+
+  - name: terraform_docs # Used to automatically generate documentation, README.md (Only usable on 'feature' branches)
+    value: 'true'
+
+  - name: terraform_format # Used to automatically lint and format code using 'terraform fmt' (Only usable on 'feature' branches)
+    value: 'true'

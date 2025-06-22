@@ -1,0 +1,33 @@
+trigger: none # Disable CI trigger
+
+# At 23:00PM on the 24th day of each month (UTC)
+schedules:
+  - cron: "0 23 24 * *" 
+    always: true
+    branches:
+      include:
+        - dev
+    displayName: Monthly Dependabot Update
+
+resources:
+  repositories:
+    - repository: Dependabot_Pipeline
+      type: git
+      name: TIM-INFRA-MODULES/terraform_yaml_pipeline_templates
+      ref: refs/heads/main
+
+stages:
+  - template: dependabot.yml@Dependabot_Pipeline
+    parameters:
+          terraformVersion: "1.8.0"
+          terraform_docs_version: "0.19.0"
+          agentPool: "GEN-CA-TCI"
+          gitRef: "dev"
+          environment: "dev"
+          tfvarFile: "module.tf.tfvars"
+          root_directory: "/Tests/"
+          service_connection_name: "cl-axso-az-core-cloudinfra-nonprod-spi" ##access to the testing subscription
+          backend_resource_group: "axso-prod-appl-tim-infra-modules-rg"
+          backend_storage_accountname: "axso4prod4appl4tim4sa"
+          container_name: "terraform-tim-infra-modules"
+          container_key: "$(Build.Repository.Name)/test_dependabot.tfstate"

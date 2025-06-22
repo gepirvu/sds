@@ -1,0 +1,27 @@
+trigger:
+  none
+
+resources:
+  repositories:
+    - repository: Terraform_Deployment_Pipeline
+      type: git
+      name: TIM-INFRA-MODULES/terraform_yaml_pipeline_templates
+      ref: refs/heads/main
+
+variables:
+- template: testing-main-vars.yml
+
+stages:
+  - template: tf_main.yml@Terraform_Deployment_Pipeline
+    parameters:
+          environment_name: "${{ variables.environment }}"
+          tfvarFile: "module.tf.tfvars"
+          root_directory: "/Tests/"
+          service_connection_name: "cl-axso-az-core-cloudinfra-nonprod-spi" ##change Service connection
+          backend_resource_group: "axso-prod-appl-tim-infra-modules-rg"
+          backend_storage_accountname: "axso4prod4appl4tim4sa"
+          container_name: "terraform-tim-infra-modules"
+          container_key: "$(Build.Repository.Name)/test_${{ variables.environment }}.tfstate"
+          pool: "${{ variables.agentPool }}"
+          terraformVersion: "${{ variables.terraformVersion }}"
+          environment_name_Job: "TF_${{ variables.environment }}_TEST_${{ variables.repo }}"

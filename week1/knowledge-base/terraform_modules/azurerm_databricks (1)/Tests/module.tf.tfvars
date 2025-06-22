@@ -1,0 +1,18 @@
+location                            = "West Europe"
+environment                         = "dev"
+project_name                        = "ssp"
+subscription                        = "np"
+resource_group_name                 = "axso-np-appl-ssp-test-rg"
+virtual_network_resource_group_name = "rg-cloudinfra-nonprod-axso-ymiw"
+virtual_network_name                = "vnet-cloudinfra-nonprod-axso-e3og"
+pe_subnet_name                      = "pe"
+key_vault_name                      = "kv-ssp-0-nonprod-axso"
+identity_type                       = "UserAssigned"
+umids_names = [
+  "axso-np-appl-ssp-test-umid"
+]
+public_subnet_name             = "adb-public"
+private_subnet_name            = "adb-private"
+frotend_private_access_enabled = "false"
+sku                            = "premium"
+storage_account_sku_name       = "Standard_LRS"

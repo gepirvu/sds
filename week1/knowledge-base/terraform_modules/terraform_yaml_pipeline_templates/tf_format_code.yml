@@ -1,0 +1,39 @@
+parameters:
+  pool:
+  terraformVersion:
+
+jobs:
+  - job: Format_Code
+    pool: ${{ parameters.pool }}
+    workspace:
+        clean: all
+
+    steps:
+      - checkout: self
+        persistCredentials: true
+
+      - task: TerraformInstaller@1
+        inputs:
+          terraformVersion: ${{ parameters.terraformVersion }}        
+
+      ### Format code using terraform fmt.
+      - script: |
+          # Set root directory
+          cd "$(Build.SourcesDirectory)"
+
+          # Terraform fmt all files
+          echo "Formatting Terraform files"
+          terraform fmt --recursive
+
+        displayName: 'Format Terraform Code'
+
+      ### Commit and push formatted code.
+      - powershell: |
+          git config --local user.email "terraform-docs@axpo.com"
+          git config --local user.name "Terraform Docs"
+          git add .
+          git commit -m "Push formatted tf code back to git repo"
+          git push origin HEAD:$(Build.SourceBranch)
+        displayName: 'Commit Format Terraform Code'
+        env:
+          SYSTEM_ACCESSTOKEN: $(System.AccessToken)

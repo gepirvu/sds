@@ -1,0 +1,28 @@
+# Replace tokens 
+
+variables:
+  - name: terraformVersion
+    value: '1.9.6'
+  
+  - name: agentPool
+    value: 'GEN-CA-TCI'
+
+  - name: gitRef
+    value: 'main'
+
+  - name: environment
+    value: 'prod'
+
+  - name: repo
+    value: 'REDIS'
+
+# Pipeline Stages (Feature flags)
+
+  - name: destroy 
+    value: 'true'
+
+  - name: terraform_docs 
+    value: 'false'
+
+  - name: terraform_format
+    value: 'false'

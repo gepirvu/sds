@@ -1,0 +1,215 @@
+parameters:
+  container_name:
+  container_key:
+  environment_name:
+  tfvarFile:
+  root_directory:
+  service_connection_name:
+  backend_resource_group:
+  backend_storage_accountname:
+  pool:
+  tflint_version:
+
+jobs:
+  - job: Validate
+    pool: ${{ parameters.pool }}
+    workspace:
+        clean: all
+    steps:
+      - checkout: self
+        persistCredentials: true
+        path: src
+
+      - checkout: Terraform_Deployment_Pipeline
+        persistCredentials: true
+        path: terraform_yaml_pipeline_templates         
+        condition: eq(variables['System.TeamProject'], 'TIM-INFRA-MODULES')        
+            
+      - task: AzureKeyVault@2
+        inputs:
+          azureSubscription: ${{ parameters.service_connection_name }} # Azure Resource Manager service connection from frontend
+          keyVaultName: 'axso-prod-appl-tim-kv'
+          secretsFilter: '*'
+          runAsPreJob: true 
+
+      - task: InstallSSHKey@0
+        inputs:
+          knownHostsEntry: $(terraform-git-ssh-known-hosts) # Known hosts entry for the git repository from key vault
+          sshPublicKey: $(terraform-git-ssh-pub) # Public key for the git repository from key vault
+          sshPassphrase: $(terraform-git-ssh-passphrase) # Passphrase for the git repository from key vault
+          sshKeySecureFile: 'terraform_rsa'
+
+      - task: TerraformInstaller@1
+        inputs:
+          terraformVersion: ${{ parameters.terraformVersion }}
+ 
+      - task: qetza.replacetokens.replacetokens-task.replacetokens@6
+        displayName: 'Replace tokens in tfvars and tf'
+        inputs:
+          root: '$(Agent.BuildDirectory)/src/${{ parameters.root_directory }}'
+          sources: |
+            *.tf
+            *.tfvars
+          encoding: 'utf8'
+          missingVarAction: 'replace'
+          missingVarLog: 'warn'
+          tokenPattern: 'custom'
+          tokenPrefix: '~{'
+          tokenSuffix: '}~'
+
+      - bash: |
+          version="v0.53.0"
+          download_path=$(mktemp -d -t tflint.XXXXXXXXXX)
+          download_zip="${download_path}/tflint.zip"
+          download_executable="${download_path}/tflint"
+          echo "Downloading TFLint $version"
+          curl --fail -sS -L -o "${download_zip}" "https://github.com/terraform-linters/tflint/releases/download/${version}/tflint_linux_amd64.zip"
+          echo "Unpacking ${download_zip} ..."
+          unzip -o "${download_zip}" -d "${download_path}"
+          echo "Downloaded successfully"
+          echo "Current tflint version"
+          "${download_path}/tflint" -v
+          if ! "${download_path}/tflint" -v > /dev/null 2>&1; then
+            echo "Error: "${download_path}/tflint" failed to execute."
+            exit 1
+          fi
+
+          ${download_path}/tflint --init --config $(Agent.BuildDirectory)/terraform_yaml_pipeline_templates/.azuredevops/tflint/.tflint.hcl
+          ${download_path}/tflint  --config $(Agent.BuildDirectory)/terraform_yaml_pipeline_templates/.azuredevops/tflint/.tflint.hcl --recursive --force --format=junit > tflint.xml    
+          if [[ $(${download_path}/tflint  --recursive --config $(Agent.BuildDirectory)/terraform_yaml_pipeline_templates/.azuredevops/tflint/.tflint.hcl --force) ]]; then
+              echo "The test have erros"
+          else
+              echo "The test result is okay, so we will upload it as an 'OK Test Result."
+              mv $(Agent.BuildDirectory)/terraform_yaml_pipeline_templates/.azuredevops/tflint/default-tflint.xml  tflint.xml 
+          fi    
+          ls -la '$(Agent.BuildDirectory)/terraform_yaml_pipeline_templates'
+          cat tflint.xml 
+          pwd
+        displayName: TFlint Linux 
+        workingDirectory: '$(Agent.BuildDirectory)/src'
+        condition: and( eq(variables['System.TeamProject'], 'TIM-INFRA-MODULES'),
+                        eq(variables['Agent.OS'], 'Linux') 
+                      )
+
+      - task: PowerShell@2
+        displayName: TFlint Windows 
+        inputs:
+          targetType: inline
+          pwsh: true
+          workingDirectory: '$(Agent.BuildDirectory)/src'
+          script: |      
+            choco install tflint --version=${{ parameters.tflint_version }} -s="https://community.chocolatey.org/api/v2/" -y
+            get-content $(Agent.BuildDirectory)/terraform_yaml_pipeline_templates/.azuredevops/tflint/.tflint.hcl
+            C:\ProgramData\chocolatey\bin\tflint.exe  --init --config $(Agent.BuildDirectory)/terraform_yaml_pipeline_templates/.azuredevops/tflint/.tflint.hcl
+            C:\ProgramData\chocolatey\bin\tflint.exe  --config $(Agent.BuildDirectory)/terraform_yaml_pipeline_templates/.azuredevops/tflint/.tflint.hcl --recursive --force --format=junit > tflint.xml        
+            $tflintt=$(C:\ProgramData\chocolatey\bin\tflint.exe  --recursive --config $(Agent.BuildDirectory)/terraform_yaml_pipeline_templates/.azuredevops/tflint/.tflint.hcl --force 2>&1)
+            If ($tflintt -ne $null)
+            {
+            Write-Host "No empty";
+            }
+            Else
+            {
+            Write-Host "The test result is okay, so we will upload it as an 'OK Test Result.";
+            mv $(Agent.BuildDirectory)/terraform_yaml_pipeline_templates/.azuredevops/tflint/default-tflint.xml  tflint.xml -force
+            }
+            ls '$(Agent.BuildDirectory)/terraform_yaml_pipeline_templates'
+            get-content tflint.xml 
+            dir
+        condition: and( eq(variables['System.TeamProject'], 'TIM-INFRA-MODULES'),
+                        startswith(variables['Agent.OS'], 'Windows')
+                      )   
+
+      - task: PublishTestResults@2
+        inputs:
+          testResultsFormat: 'JUnit'
+          testResultsFiles: '$(Agent.BuildDirectory)/src/tflint.xml'
+          testRunTitle: TFlint
+          ${{ if or(eq(variables['Build.SourceBranch'], 'refs/heads/dev'), startswith(variables['Build.SourceBranch'], 'refs/heads/feature'))  }}:
+           failTaskOnFailedTests: true
+          ${{ else }}:
+           failTaskOnFailedTests: false           
+        condition: eq(variables['System.TeamProject'], 'TIM-INFRA-MODULES')    
+
+      - task: TerraformTaskV4@4
+        displayName: Terraform Init
+        inputs:
+          provider: 'azurerm'
+          command: 'init'
+          workingDirectory: '$(Agent.BuildDirectory)/src/${{ parameters.root_directory }}'
+          backendServiceArm: ${{ parameters.service_connection_name }}
+          backendAzureRmResourceGroupName: ${{ parameters.backend_resource_group }}
+          backendAzureRmStorageAccountName: ${{ parameters.backend_storage_accountname }}
+          backendAzureRmContainerName: ${{ parameters.container_name }}
+          backendAzureRmKey: ${{ parameters.container_key }}
+        env:
+          ARM_USE_AZUREAD: true
+
+      - task: TerraformTaskV4@4
+        displayName: Terraform Validate
+        inputs:
+          provider: 'azurerm'
+          command: 'validate'
+          workingDirectory: '$(Agent.BuildDirectory)/src/${{ parameters.root_directory }}'
+          environmentServiceNameAzureRM: ${{ parameters.service_connection_name }}
+        env:
+          ARM_USE_AZUREAD: true          
+          
+      - task: TerraformTaskV4@4
+        displayName: Terraform Plan
+        inputs:
+          provider: 'azurerm'
+          command: 'plan'
+          workingDirectory: '$(Agent.BuildDirectory)/src/${{ parameters.root_directory }}'
+          commandOptions: "--input=false --var-file=$(Agent.BuildDirectory)/src/${{ parameters.root_directory }}${{ parameters.tfvarFile }} --out=$(Agent.BuildDirectory)/src/${{ parameters.root_directory }}plan.tfplan"
+          environmentServiceNameAzureRM: ${{ parameters.service_connection_name }}
+        env:
+          ARM_USE_AZUREAD: true
+
+      - task: PowerShell@2
+        name: ChangeDetection
+        inputs:
+          targetType: inline
+          pwsh: true
+          displayName: Saving Terraform Plan Output
+          workingDirectory: '$(Agent.BuildDirectory)/src/${{ parameters.root_directory }}'
+          script: |
+            cd "$(Agent.BuildDirectory)/src/${{ parameters.root_directory }}"
+            terraform show -json -no-color $(Agent.BuildDirectory)/src/${{ parameters.root_directory }}plan.tfplan >> $(Agent.BuildDirectory)/src/${{ parameters.root_directory }}plan.json
+            $obj = Get-Content $(Agent.BuildDirectory)/src/${{ parameters.root_directory }}plan.json | ConvertFrom-Json
+            $nc = ($obj.resource_changes | where { 'no-op' -notcontains $_.change.actions }).length -ne 0
+            echo "##vso[task.setvariable variable=tf_haschg;isOutput=true]$nc"
+            $add = ($obj.resource_changes | where { 'create' -eq $_.change.actions }).length
+            echo "##vso[task.setvariable variable=tf_add;isOutput=true]$add"
+            $del = ($obj.resource_changes | where { 'delete' -eq $_.change.actions }).length
+            echo "##vso[task.setvariable variable=tf_del;isOutput=true]$del"
+            $del_chg = ($obj.resource_changes | where { '{delete, create}' -eq $_.change.actions }).length
+            echo "##vso[task.setvariable variable=tf_delchg;isOutput=true]$del_chg"
+            $upd = ($obj.resource_changes | where { 'update' -eq $_.change.actions }).length
+            echo "##vso[task.setvariable variable=tf_upd;isOutput=true]$upd"
+            echo "total changes $nc"
+            echo "add $add"
+            echo "delete $del"
+            echo "delete_change $del_chg"
+            echo "updates $upd"
+
+      - task: PowerShell@2
+        condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+        displayName: Prepare Artifacts
+        inputs:
+          targetType: inline
+          pwsh: true
+          workingDirectory: '$(Agent.BuildDirectory)/src'
+          script: |
+            New-Item -Path . -Name artifacts/${{ parameters.root_directory }} -ItemType Directory -Force
+            Copy-Item -Path ./${{ parameters.root_directory }}/*.tf -Destination ./artifacts/${{ parameters.root_directory }} -Force
+            Copy-Item -Path ./${{ parameters.root_directory }}/*.tfvars -Destination ./artifacts/${{ parameters.root_directory }} -Force
+            Copy-Item -Path ./${{ parameters.root_directory }}/*.json -Destination ./artifacts/${{ parameters.root_directory }} -Force
+            Copy-Item -Path ./${{ parameters.root_directory }}/*.tfplan -Destination ./artifacts/${{ parameters.root_directory }} -Force
+
+      - task: PublishBuildArtifacts@1
+        condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+        displayName: 'Publish ${{ parameters.environment_name }} Artifacts'
+        inputs:
+          PathtoPublish: '$(Agent.BuildDirectory)/src/artifacts'
+          publishLocation: Container
+          ArtifactName: ${{ parameters.environment_name }}

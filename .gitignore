@@ -183,3 +183,4 @@ cython_debug/
 6_mcp/memory/*.db
 
 week1/vector_db/
+week1/knowledge_base/terraform_modules/

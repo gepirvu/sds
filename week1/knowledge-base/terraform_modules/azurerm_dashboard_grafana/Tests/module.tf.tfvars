@@ -1,0 +1,21 @@
+resource_group_name                             = "axso-np-appl-ssp-test-rg"
+location                                        = "westeurope"
+subscription                                    = "np"
+project_name                                    = "cloudinfrastructure"
+environment                                     = "test"
+api_key_enabled                                 = false
+grafana_major_version                           = "10"
+sku                                             = "Standard"
+zone_redundancy_enabled                         = false
+deterministic_outbound_ip_enabled               = false
+smtp_enable                                     = false
+identity_type                                   = "SystemAssigned"
+network_resource_group_name                     = "rg-cloudinfra-nonprod-axso-ymiw"
+virtual_network_name                            = "vnet-cloudinfra-nonprod-axso-e3og"
+monitor_workspace_public_network_access_enabled = true
+pe_subnet_name                                  = "pe"
+azure_monitor_workspace_enabled                 = true
+admin_groups                                    = ["CL-AZ-SUBS-cloudinfra-nonprod-Owner"]
+editor_groups                                   = ["CL-AZ-SUBS-cloudinfra-nonprod-Owner"]
+viewer_groups                                   = ["CL-AZ-SUBS-cloudinfra-nonprod-Owner"]
+

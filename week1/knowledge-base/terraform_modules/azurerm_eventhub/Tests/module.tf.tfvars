@@ -1,0 +1,10 @@
+location                    = "West Europe"
+environment                 = "dev"
+project_name                = "ssp"
+subscription                = "np"
+resource_group_name         = "axso-np-appl-ssp-test-rg"
+partition_count             = 2
+message_retention           = 1
+network_resource_group_name = "rg-cloudinfra-nonprod-axso-ymiw"
+virtual_network_name        = "vnet-cloudinfra-nonprod-axso-e3og"
+pe_subnet_name              = "pe"

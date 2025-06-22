@@ -1,0 +1,16 @@
+# Replace tokens 
+variables:
+  - name: terraformVersion
+    value: '1.6.0'
+  
+  - name: agentPool
+    value: 'TCI-OnPrem-WinAnand'
+
+  - name: gitRef
+    value: 'feature/ml/rg' # Replace with your branch name when running tests on your feature branch (e.g. feature/ml/my_awesome_feature)
+
+  - name: environment
+    value: 'feature'
+    
+  - name: repo
+    value: 'MONITOR_DIAGNOSTIC'

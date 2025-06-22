@@ -1,0 +1,19 @@
+# Replace tokens 
+variables:
+  - name: terraformVersion
+    value: '1.9.6'
+  
+  - name: agentPool
+    value: 'GEN-CA-TCI'
+
+  - name: gitRef
+    value: 'dev'
+
+  - name: environment
+    value: 'dev'
+  
+  - name: repo
+    value: 'CONTAINER_APP'
+  
+  - name: destroy
+    value: 'true'
