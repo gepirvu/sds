@@ -181,3 +181,7 @@ cython_debug/
 # Ignore Accounts database in capstone project
 6_mcp/accounts.db
 6_mcp/memory/*.db
+
+week1/vector_db/
+week2/questions.jsonl
+week2/prices.db
