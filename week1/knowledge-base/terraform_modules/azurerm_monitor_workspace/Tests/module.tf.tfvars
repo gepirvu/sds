@@ -1,5 +1,0 @@
-location            = "West Europe"
-environment         = "dev"
-project_name        = "ssp"
-subscription        = "np"
-resource_group_name = "axso-np-appl-ssp-test-rg"

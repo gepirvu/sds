@@ -1,7 +1,0 @@
-location                     = "West Europe"
-environment                  = "tst"
-project_name                 = "ssp"
-application_type             = "web"
-subscription                 = "np"
-log_analytics_workspace_name = "axso-np-appl-cloudinfra-dev-loga"
-resource_group_name          = "axso-np-appl-ssp-test-rg"

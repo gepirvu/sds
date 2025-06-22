@@ -1,2 +1,0 @@
-#Common Vars
-location = "westeurope"
