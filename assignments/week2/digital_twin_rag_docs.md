@@ -104,7 +104,7 @@ python -c "from core.chatbot import ChatBot; print(ChatBot().chat('hi', []))"
 ### Rebuild vector DB (if empty/corrupt)
 
 ```powershell
-python week2\repair_rag.py       # wipes & re‑embeds résumé
+Remove-Item .\vector_db -Recurse -Force -ErrorAction SilentlyContinue       # wipes & re‑embeds résumé
 ```
 
 ---
