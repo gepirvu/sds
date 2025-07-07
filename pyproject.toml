@@ -24,6 +24,7 @@ dependencies = [
     "playwright>=1.52.0",
     "plotly>=6.1.2",
     "psutil>=7.0.0",
+    "pydantic>=2.11.7",
     "pypdf>=5.6.0",
     "python-dotenv>=1.1.0",
     "ratelimit>=2.2.1",
