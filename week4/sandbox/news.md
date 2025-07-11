@@ -1,20 +1,13 @@
-# News Summary - Texas Floods and Search for Survivors
+# News Summaries from BBC, CNN, and The New York Times
 
 ## BBC News
-- At least 32 people, including 14 children, have died due to flash floods in Kerr County, Texas.
-- The Guadalupe River rose more than 26 feet in less than an hour.
-- 27 children remain missing from a Christian summer camp along the river.
-- Rescue efforts are ongoing with federal support promised.
+### Trump delays tariffs on 14 countries until August
+President Donald Trump announced he plans to impose tariffs on goods from 14 countries, including Japan and South Korea, starting from August 1. These tariffs aim to protect US businesses and boost domestic manufacturing, although economists warn they may raise prices and reduce trade. The tariffs vary by country, with some set as high as 40%. The move follows a pause on previous tariff threats to allow trade negotiations.
 
 ## CNN
-- Father Ty Badon is desperately searching for his 21-year-old daughter and her friends missing since the floods.
-- The floods swept through parts of Texas causing widespread devastation.
-- Rescue operations continue as the community prays for the survival of the missing individuals.
+### Trump’s government cuts scrutinized after Texas floods tragedy
+Flash floods in Texas killed at least 95 people, with many still missing. The disaster brought attention to staffing and budget cuts at the National Weather Service and FEMA under President Trump. Some forecasting stations lacked key meteorologists, and positions critical for communication during emergencies remain unfilled. The administration's stance on reducing federal disaster response roles is under scrutiny as recovery efforts continue.
 
 ## The New York Times
-- The death toll from the floods in Central Texas has reached 47, including 15 children.
-- Search efforts for the missing campers from Camp Mystic, a Christian summer camp, are intensifying but the likelihood of finding survivors is diminishing.
-- The floodwaters rose rapidly, and residents along the Guadalupe River faced severe destruction.
-- The region, known as "Flash Flood Alley," is prone to such sudden and severe flooding.
-- Local officials have vowed to continue the search relentlessly despite the grim situation.
-
+### Texas floods become one of the deadliest in decades
+Central Texas experienced a devastating flood, becoming one of the deadliest in decades with more than 100 fatalities and several missing, including young campers and a counselor. The White House defended President Trump's efforts to downsize disaster preparedness agencies despite criticism. Tariffs against Japan and South Korea were also highlighted in other major news, reflecting ongoing trade tensions.

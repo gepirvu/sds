@@ -1,7 +1,7 @@
-# AI Agent Joke
+## AI Agents Walk into a Bar
 
-**Opening Patter:** Why did the AI agent cross the road?
+**Setup**
+Why don't AI agents make good comedians?
 
-**Setup:** To optimize its path for maximum efficiency.
-
-**Punchline:** But it ended up in a loop because it couldn't "decide" where to stop!
+**Punchline**
+Because they always have to analyze the data before they get to the punchline!
